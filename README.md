@@ -1,220 +1,120 @@
 🔥Vue2虚拟节点以及createElement函数
 
-# 1. 概念介绍
+# 1. 渲染器的渲染流程
 
-虚拟 DOM (Virtual DOM，简称 VDOM) 是一种编程概念。
+在讨论虚拟节点之前，我们先来了解一下浏览器渲染的流程。
 
-意为将目标所需的 UI 通过数据结构“虚拟”地表示出来。一般保存在内存中，将真实的DOM与之保持同步。 
+当浏览器接收到一个 HTML 文件后，JavaScript 引擎与浏览器的渲染引擎随即开始运行。
 
-具体来说，虚拟 DOM 是由一系列的 ```JavaScript 对象```组成的树状结构，每个对象代表着一个DOM元素，包括元素的标签名、属性、子节点等信息。
+从渲染引擎的角度来看，它首先会把 HTML 文件解析为一个 DOM 树。
 
-虚拟 DOM 中的每个节点都是一个 ```JavaScript 对象```。
+与此同时，浏览器会识别并加载 CSS 样式，然后将其与 DOM 树合并，形成一个渲染树。
 
-> vue是基于 vdom 的前端框架，组件渲染时```执行 vue实例上的 render方法 会返回 vdom```，渲染器再把 vdom 通过浏览器增删改的 api 同步到 dom。
+在有了渲染树之后，渲染引擎会计算所有元素的位置信息，最后通过绘制操作，在屏幕上呈现出最终的内容。
 
-如下这种DOM结构。
+JavaScript 引擎和渲染引擎虽然处于两个独立的线程之中，然而 JavaScript 引擎却能够触发渲染引擎开始工作。
 
-```js 
-<div>
-    <div id="apple">苹果</div>
-    <div class="banana">香蕉</div>
-    <div>火龙果</div>
-</div> 
-```
+当我们借助脚本去更改元素的位置或者外观时，JavaScript 引擎会运用与 DOM 相关的 API 方法来操作 DOM 对象。
 
-上面这种DOM结构在vue中会编译成对应结构的```createElement```函数调用。
+此时渲染引擎便开始运作，渲染引擎会触发回流或者重绘操作。
 
-最终会生成类似下面这种vdom结构（省略部分属性）。
+我们来了解下回流以及重绘的概念：
+
+* 回流：当我们对DOM的修改引发了```元素尺寸的变化```时，浏览器需要重新计算元素的大小和位置，最后将重新计算的结果绘制出来，这个过程称为回流。
+
+* 重绘：当我们对DOM的修改只单纯```改变元素的颜色```时，浏览器此时并不需要重新计算元素的大小和位置，而只要重新绘制新样式。这个过程称为重绘。
+
+```很显然，回流比起重绘更加消耗性能。```
+
+通过了解浏览器基本的渲染机制，我们不难联想到，当不断地通过 JavaScript 修改 DOM 时，很容易在不经意间触发渲染引擎的回流或者重绘，而这种操作所带来的性能开销是非常巨大的。
+
+因此，为了降低性能开销，我们需要做的是尽可能地减少对 DOM 的操作。
+
+虚拟节点就是在这种情况下孕育而生。
+
+# 2. 缓冲层-虚拟DOM
+
+虚拟 DOM （Virtual DOM 以下简称 VDOM）是为了解决频繁操作 DOM 所引发的性能问题而产生的产物。
+
+VDOM是把页面的状态抽象成 JS 对象的形式呈现。
+
+从本质上来说，它处于 JS 与真实 DOM 之间，起着中间层的作用。
+
+当我们需要使用 JS 脚本进行大批量的 DOM 操作时，会优先在虚拟 VDOM 这个 JS 对象上进行操作。
+
+最后，通过对比找出将要改动的部分，并将这些改动通知并更新到真实的 DOM 上。
+
+尽管最终仍然是对真实的 DOM 进行操作，然而虚拟 DOM 能够将多个改动合并为一个批量操作。
+
+这样做可以减少 DOM 重排的次数，进而缩短生成渲染树以及进行绘制所花费的时间。
+
+我们来看一下一个真实的 DOM 具体包含了哪些内容。
+
+![alt text](image-1.png)
+
+浏览器将真实的 DOM 设计得极为复杂。
+
+它不但包含了自身的属性描述，如大小、位置等定义，还囊括了 DOM 所拥有的浏览器事件等内容。
+
+正是由于其如此复杂的结构，我们频繁地去操作 DOM 或多或少会给浏览器带来性能方面的问题。
+
+而作为数据与真实 DOM 之间的一层缓冲，虚拟 DOM 只是用于映射到真实 DOM 进行渲染，所以并不需要包含操作 DOM 的方法。它只需在对象中重点关注几个属性就可以了。
 
 ```js
+// 真实DOM
+<div id="app"><span>Hello World</span></div>
+
+// 真实DOM对应的JS对象(VDOM)
 {
   tag:'div',
-  data:undefined,
-  children:[
-    {
-      tag:'div',
-      data:{
-        attrs:{
-          id:"apple"
-        }
-      },
-      children:[
-        {
-          tag:undefined,
-          text:"苹果"
-        }
-      ]
-    },
-    {
-      tag:'div',
-      data:{
-        staticClass:'bannana'
-      },
-      children:[
-        {
-          tag:undefined,
-          text:"香蕉"
-        }
-      ]
-    },
-    {
-      tag:'div',
-      data:undefined,
-      children:[
-        {
-          tag:undefined,
-          text:"火龙果"
-        }
-      ]
-    }
-  ]
+  data:{
+    id:'app'
+  },
+  children:[{
+    tag:'span',
+    children:[
+      {
+        tag:undefined,
+        text:'Hello World'
+      }
+    ]
+  }]
 }
 ```
 
-```在前端领域虚拟 DOM 就是一个普通的 JS对象```。
+# 3. VNode 
 
-我们可以利用对象上的属性来构建```真实 DOM 树```。
+## 3.1 Vnode构造函数
 
-# 2. vue 的模板编译
+可以看出来，每一个 DOM节点 都可以使用一个 VNode 来表示。
 
-在 vue 中，通常我们会采取Runtime-Only模式运行 vue 项目。
-
-在这个模式中，我们在构建阶段所有的模版```(<template>标签中的HTML)```已经被```预编译```成Javascript渲染函数（render函数）。
-
-预编译过程通常由如vue-loader配合vue-template-compiler这样的工具在Webpack构建过程中完成，它们会把.vue文件中的模板转换为高效的JavaScript代码。
-
-如下图，会将模版部分编译成一个 render 函数。 
-
- ![alt text](image.png)
-
-```不管是使用template属性直接编写HTML模板还是使用 vue 脚手架搭建项目，模版最终都会编译为 render 函数```。
-
-# 3. render 函数的本质
-
-## 3.1 _render 方法
-
-在 vue 源码中，是调用 vm._render 函数来获取需要渲染的vDom。
-
-那么_render和 render函数有什么关联呢？
-
-在 vue 框架初始化时中给Vue构造函数上添加了 _render 方法。 
+在 Vue内部，使用 VNode 这个构造函数去描述一个节点。
 
 ```js
-Vue.prototype._render = function () {
-    const vm = this;
-    const { render } = vm.$options;
-    // 调用 vue 实例中的 render 选项 返回 vdom
-    let vdom = render.call(vm);
-    return vdom;
-}
-``` 
-可以看出_render方法就是调用 vue 实例上的render方法。
-
-所以核心还是  vm.render 方法。
-
-## 3.2 vm是什么？
-
-上面我们可以看到有大量的 vm 代码。
-
-其实 vm 在 vue 中代表 ```vue实例```。
-
-每一个 vue 组件都对应着一个 vue实例。
-
-每一个实例上都有对应的 render 方法。比如前面 ```2.1``` 所提到的：
-
-```js
-var render = function render() {
-    var _vm = this
-      , _c = _vm._self._c;
-    return _c("div", 
-        [
-            _c("div", {attrs: {id: "apple"}}, [_vm._v("苹果")]), 
-            _c("div", {staticClass: "banana"}, [_vm._v("香蕉")]), 
-            _c("div", [_vm._v("火龙果")])
-        ]
-    );
-};
-``` 
-
-上面这个render函数会被挂载到```vm.render```上。
-
-## 3.3 vm._self指的是什么？ 
-
-vm._self 是在vue框架初始化时 vm._init 方法中设置的，如下。
-
-```js
-Vue.prototype._init = function(){
-    const vm = this
-    vm._self = vm
-}
-```  
-通过上面，我们很容易发现_self就是指的实例本身。
-
-## 3.4 vm._self._c指的是什么？
-
-上面我们知道 vm._self 其实就是 vm 。
-
-那么 ```vm._self._c  === vm._c```。
-
-vm._c 是在vue框架初始化时在 initRender 函数中定义的。
-
-```js
-export function initRender(vm){
-    vm._c = (a, b, c, d) => createElement(vm, a, b, c, d, false)
-}
-```  
-
-可以看到实际上是调用了 createElement 这个函数。
-
-## 3.5 总结
-
-通过上面的总结，我们知道 render 函数本质上就是将模版对应结构的createElement函数调用。
-
-# 4. vnode
-
-之前我们知道render函数的返回值是一个vdom，所以createElement的返回结果也是一个vdom，即带有特殊标识的js对象。
-
-既然这个vdom是一个比较关键的对象信息，那么vue中有没有将他抽成一个通用的类来使用呢？
-
-答案是有的。
-
-因为需要频繁的创建vdom，所以vue将其抽象成一个类，如下（```后面我们就把vdom叫做vnode```）。 
-
-```js
-export default class VNode {
-  tag
-  data
-  children 
-  elm
-  context
-  text
+export default class VNode { 
   constructor(
     tag,
     data,
     children, 
     text,
-    elm,
-    context
+    elm
   ) {
-    this.tag = tag
-    this.data = data
-    this.children = children
-    this.elm = elm 
-    this.context = context
-    this.text = text
+    this.tag = tag // 标签 
+    this.data = data // 数据
+    this.children = children // 子节点信息
+    this.elm = elm // 真实DOM元素
+    this.text = text // 文字（文字节点特有）
   }
 }
 ```
 
 由上面的代码可知。
 
-vnode的构造参数是有序且固定的。
-
-意味着创建时不能将参数顺序传错，否则会产生比较大的问题。
+vnode的构造参数是有序且固定的，意味着创建时不能将参数顺序传错。
 
 我们详细阐述下下面几个核心属性。
 
-## 4.1 tag
+### 3.1.1 tag
 
 这个参数指定了要创建的虚拟节点的标签名称。
 
@@ -224,10 +124,8 @@ tag可以是 HTML 元素，比如字符串```'span'、'div'```。
 
 ```js
 // 编译前
-<div></div>
+<div></div> 
 // 编译后
-_createElement("div") 
-// _createElement函数执行后
 VNode {
   tag:"div"
 }
@@ -235,11 +133,11 @@ VNode {
 
 也可以是一个组件引用，同样可以是一个动态标签。 
 
-## 4.2 data
+### 3.1.2 data
 
 data 参数通常是一个对象，包含了用于描述 VNode 的各种属性和配置信息。
 
-data参数可以由以下几种构成：
+data 参数可以由以下几种构成：
 
 1. attrs
 
@@ -251,8 +149,6 @@ attrs 是一个对象，包含了要设置在元素上的静态属性。
 // 编译前
 <img src="image.jpg" />
 // 编译后
-_createElement('img', { attrs: { src: 'image.jpg' } });
-// _createElement函数执行后
 VNode {
   tag:"img",
   data:{
@@ -269,8 +165,6 @@ VNode {
 // 编译前
 <div class="custom-class"></div>
 // 编译后
-_createElement('div', { staicClass: 'custom-class' });
-// _createElement函数执行后
 VNode {
   tag:"img",
   data:{ staicClass: 'custom-class' }
@@ -284,8 +178,6 @@ VNode {
 // 编译前
 <div style="color:'red'"></div>
 // 编译后
-_createElement('div', { style: { color: 'red' } });
-// _createElement函数执行后
 VNode {
   tag:"div",
   data:{ style: { color: 'red' }}
@@ -300,8 +192,6 @@ on 属性用于绑定事件监听器。
 // 编译前
 <button click="() => console.log('Clicked')"></button>
 // 编译后
-_createElement('button', { on: { click: () => console.log('Clicked') } });
-// _createElement函数执行后
 VNode {
   tag:"button",
   data:{ on: { click: () => console.log('Clicked') } }
@@ -316,8 +206,6 @@ VNode {
 // 编译前
 <div slot="header"></div>
 // 编译后
-_createElement('button', { slot: 'header' });
-// _createElement函数执行后
 VNode {
   tag:"button",
   data:{ slot: 'header' }
@@ -332,8 +220,6 @@ VNode {
 // 编译前
 <MyComponent message="Hello World"></MyComponent>
 // 编译后
-_createElement(context, MyComponent, { props: { message: 'Hello World' } });
-// _createElement函数执行后
 VNode {
   tag:MyComponent,
   data:{ props: { message: 'Hello World' } }
@@ -348,8 +234,6 @@ VNode {
 // 编译前
 <input v-model="value" />
 // 编译后
-_createElement('input', { directives: [{ name: 'model', value: 'value' }] });
-// _createElement函数执行后
 VNode {
   tag:"input",
   data:{ directives: [{ name: 'model', value: 'value' }] }
@@ -364,8 +248,6 @@ VNode {
 // 编译前
 <li key="unique-key"></li>
 // 编译后
-_createElement('li', { key: 'unique-key' });
-// _createElement函数执行后
 VNode {
   tag:"li",
   data:{ key: 'unique-key' }
@@ -373,7 +255,7 @@ VNode {
 ``` 
 
 
-## 4.3 children
+### 3.1.3 children
 
 children 参数是指定一个 VNode（虚拟节点）的子节点内容。这个参数可以包含多种类型的数据，用于描述子节点的结构和内容。
 
@@ -387,8 +269,6 @@ children 参数是指定一个 VNode（虚拟节点）的子节点内容。这�
 // 编译前
 <div>Hello World</div>
 // 编译后
-_createElement('div', {}, 'Hello World');
-// _createElement函数执行后
 VNode {
   tag:"div", 
   data:{},
@@ -406,7 +286,7 @@ children 参数也可以是一个数组，其中包含多个子节点。
 
 这些子节点可以是任意组合的 VNode 对象、字符串或其他可以转换为 VNode 的数据结构。
 
-## 4.4 text
+### 3.1.4 text
 
 我们知道并不是每个节点都有tag的，比如文字节点就没有tag。
 
@@ -414,111 +294,125 @@ children 参数也可以是一个数组，其中包含多个子节点。
 
 ```js
 // 编译前
-"我是"
+"我是" 
 // 编译后
-createElement(undefined,undefined,undefined,"我是")
-// _createElement函数执行后
 VNode {
   text:"我是"
 }
 ```
 
-## 4.5 elm
+### 3.1.5 elm
 
-之前我们说过，每一个虚拟节点都对应着一个真实DOM节点。
+每一个虚拟节点都对应着一个真实DOM节点。
 
 所以这个elm就是对应虚拟节点上绑定真实DOM节点。
+ 
 
-## 4.6 context
+> Vnode 定义的属性大约有二十几个。
+>
+> 显然，使用 Vnode 对象要比真实 DOM 对象所描述的内容简单得多。
+>
+> 它只单纯用来描述节点的关键属性，例如标签名、数据、子节点等。
+>
+> 并没有保留与浏览器相关的 DOM 方法。
+>
+> 除此之外，Vnode 还会有其他的属性，用以扩展 Vue 的灵活性。
 
-context就是上下文，也就是自身。
+## 3.2 createEmptyVNode
 
-可以通过这个参数获取实例上的各个属性并灵活使用。 
-
-
-# 5. createElement函数
-
-前面我们简单介绍了vnode，而createElement也是调用了VNode的函数。
-
-我们来好好研究一下这个 createElement 函数。 
+在虚拟DOM中，注释也被当成是一个节点。
 
 ```js
-export function createElement(
-  context,
-  tag,
-  data,
-  children
-){
-  if (isArray(data) || isPrimitive(data)) { 
-    // 兼容data 和 children
-    children = data
-    data = undefined
-  }
-  return _createElement(context, tag, data, children)
+// 创建注释vnode节点
+const createEmptyVNode = (text: string = '') => {
+  const node = new VNode()
+  node.text = text
+  node.isComment = true
+  return node
+};
+```
+
+## 3.3 createEmptyVNode
+
+```js
+// 创建文本vnode节点
+export function createTextVNode(val: string | number) {
+  return new VNode(undefined, undefined, undefined, String(val))
 }
 ```
 
-## 5.1 灵活性
+## 3.4 cloneVNode
 
-我们可以看出来这个函数最后又调用了_createElement。
+注意这里对 children使用了 slice。
 
-只是其中对children属性和 data 属性做了处理。
-
-那么这个处理的意义是什么呢？
-
-这个判断的存在主要是为了提高函数的灵活性和易用性，允许用户在调用 createElement 函数时有几种不同的方式来传递参数：
-
-1. 标准调用：
+表示这里只是做了一层浅拷贝
 
 ```js
-// 编译前
-<div class="container">
-    Hello World
-</div>
-// 编译后
-createElement(context, 'div', { class: 'container' }, ['Hello World']);
+export function cloneVNode(vnode: VNode): VNode {
+  const cloned = new VNode(
+    vnode.tag,
+    vnode.data,
+    vnode.children && vnode.children.slice(),
+    vnode.text,
+    vnode.elm,
+    vnode.context,
+    vnode.componentOptions,
+    vnode.asyncFactory
+  )
+  cloned.ns = vnode.ns
+  cloned.isStatic = vnode.isStatic
+  cloned.key = vnode.key
+  cloned.isComment = vnode.isComment
+  cloned.fnContext = vnode.fnContext
+  cloned.fnOptions = vnode.fnOptions
+  cloned.fnScopeId = vnode.fnScopeId
+  cloned.asyncMeta = vnode.asyncMeta
+  cloned.isCloned = true
+  return cloned
+}
 ```
 
-目前 data 只可能是对象或者为空。
+## 3.5 emptyNodeAt
 
-2. 只有子节点： 
+传入一个真实 DOM，获取基于这个真实 DOM元素所产生的虚拟 DOM。
 
 ```js
-// 编译前
-<div>Hello World</div>
-// 编译后
-createElement(context, 'div', 'Hello World');
+function emptyNodeAt(elm) {
+  return new VNode(nodeOps.tagName(elm).toLowerCase(), {}, [], undefined, elm)
+}
 ```
 
-这种情况就对应着 isPrimitive 的判断。
+# 4. createElement函数
 
-isPrimitive可以判断值的类型是否是一个原始类型（如字符串、数字、布尔值）。
+经过上面的学习，我们知道虚拟 DOM就是一个JS对象。
 
-在这种情况下，对应着 data 实际上是子节点内容，应该被解释为 children，而 data 应该为 undefined。
+只不过他有很多属性，所以创建一个虚拟 DOM也绝不是什么难事。
 
-3. 子节点数组：
+但是 vue 框架给我们提供了一个函数createElement。 
 
-```js
-// 编译前
-<ul>
-    <li>Item 1</li>
-    <li>Item 2</li>
-</ul>
-// 编译后
-createElement(context, 'ul', ['<li>Item 1</li>', '<li>Item 2</li>']);
-```
+## 4.1 createElement函数的优势
 
-这种情况就对应着 isArray 的判断。
- 
-isArray可以判断值的类型是否是一个数组。
+createElement函数的意义在于它提供了一种更方便、更简洁且更具可读性的方式来创建vnode，相比直接编写 VNode 具有以下好处： 
 
-在这种情况下，对应 data 是一个包含子节点的数组，应该被解释为 children，而 data 应该为 undefined。
+### 4.1.1 直观的参数形式
 
-> 所以在传入_createElement时参数已经被处理过了，体现了 vue 框架处理参数的灵活性和易用性。
+使用createElement函数可以通过直观的参数来描述虚拟节点的属性。
 
-# 6. _createElement函数
+相比之下，直接编写 VNode 对象时，需要手动构建一个包含多个属性的 JavaScript 对象，可能会导致代码较为冗长和复杂，降低了可读性和可维护性。
 
-经过 createElement 对参数的处理，_createElement收到的参数意义不会有偏差了。 
+### 4.1.2 统一的创建方式
+
+在项目中使用createElement函数可以确保虚拟节点的创建方式一致。
+
+直接编写 VNode 对象可能会导致不同的开发者采用不同的方式来构建虚拟节点，从而降低了代码的一致性和可维护性。
+
+### 4.1.3 动态属性和条件判断
+
+createElement函数可以接收动态的参数，允许在运行时根据条件来决定虚拟节点的属性。例如，可以根据数据的变化动态地添加或修改属性，或者根据条件判断来决定是否创建某个子节点。
+
+直接编写 VNode 对象时，要实现类似的动态行为可能需要更多的代码和逻辑处理，增加了代码的复杂性。
+
+## 4.2 源码解读
 
 ```js
 export function _createElement(
@@ -618,7 +512,7 @@ export function _createElement(
 }
 ```
 
-## 6.1 避免将响应式对象传入data中
+### 4.2.1 避免将响应式对象传入data中
 
 ```js
 if (isDef(data) && isDef((data as any).__ob__)) {
@@ -647,7 +541,7 @@ __ob__属性通常由Vue的响应式系统添加到一个对象上，表示这�
 
 如果你传入了一个响应式对象，函数会返回一个空的vnode。
 
-## 6.2 data.is实现动态切换tag
+### 4.2.2 data.is实现动态切换tag
 
 ```js
 if (isDef(data) && isDef(data.is)) {
@@ -681,7 +575,7 @@ export default {
 ```
 > 但是经过研究发现在模版中传入is并不会传入data当中，而是直接在编译时变成了第一个参数进行传递。
 
-## 6.3 tag非空判断
+### 4.2.3 tag非空判断
 
 ```js
 if (!tag) {
@@ -705,7 +599,7 @@ _createElement(undefined,{tag:'span'})
 ```
 > 可以通过```data.tag```来判断标签。
 
-## 6.4 判断 data.key 是否是原始类型
+### 4.2.4 判断 data.key 是否是原始类型
 
 ```js
 if (__DEV__ && isDef(data) && isDef(data.key) && !isPrimitive(data.key)) {
@@ -721,7 +615,7 @@ if (__DEV__ && isDef(data) && isDef(data.key) && !isPrimitive(data.key)) {
 
 因为如果存在一个非原始类型的key，可能会导致一些不可预测的行为以及性能问题等。
 
-## 6.5 处理作用域插槽
+### 4.2.5 处理作用域插槽
 
 ```js
 if (isArray(children) && isFunction(children[0])) {
@@ -758,7 +652,7 @@ if (isArray(children) && isFunction(children[0])) {
 
 此时，Vue会将这个函数转换为scopedSlots属性的一部分，并清空children数组，以确保在后续的渲染过程中不会重复处理这个函数。
 
-## 6.6 根据normalizationType来规范化节点
+### 4.2.6 根据normalizationType来规范化节点
 
 ```js
 if (normalizationType === ALWAYS_NORMALIZE) {
@@ -768,14 +662,14 @@ if (normalizationType === ALWAYS_NORMALIZE) {
 }
 ```
 
-### 6.6.1 规范化类型
+#### 4.2.6.1 规范化类型
 
 normalizationType变量指定了应该如何规范化children。根据normalizationType的不同值，Vue会采用不同的规范化策略：
 
 1. ```ALWAYS_NORMALIZE```：总是执行完整的规范化处理。
 2. ```SIMPLE_NORMALIZE```：执行简单的规范化处理。
 
-### 6.6.2 规范化函数
+#### 4.2.6.2 规范化函数
 
 1. normalizeChildren(children)
 
@@ -818,7 +712,7 @@ export function simpleNormalizeChildren(children: any) {
 
 > vm._c 中默认使用的是第二种模式simpleNormalizeChildren，因为编译的时候已经规范化了，无需对children再进一步处理。
 
-## 6.7 创建vnode
+### 4.2.7 创建vnode
 
 ```js
 let vnode, ns
@@ -866,7 +760,7 @@ if (typeof tag === 'string') {
 
 上面就是根据tag、data、children等属性来创建一个vnode。
 
-## 6.8 返回vnode
+### 4.2.8 返回vnode
 
 ```js
  if (isArray(vnode)) {
@@ -882,19 +776,241 @@ if (typeof tag === 'string') {
 
 在一系列的处理过后，最终返回需要的vnode。
 
-# 7. 总结 
+# 5. Component类型的vnode
 
-vue框架提供了2种方式来编写代码。
+在vue的模版编译中，会根据html标签进行编译。
 
-第一种是使用模版的方式来编写。
+不会根据你的标签类型来区分编译的结果。
 
-第二种则是使用render函数配合createElement方法来编写。
+比如：
 
-其中使用render函数编写则更加灵活。
+```js
+<div>Hello World</div>
+<ChildComponent>
+```
 
-而这2种方式最终都会生成虚拟DOM来进行后续渲染。
+上面的2个标签会被编译成：
 
-其中createElement函数的存在是为了让我们更轻松的生成虚拟DOM。
+```js
+_c('div',["Hello World"])
+_c('ChildComponent')
+```
+
+他没有根据你的标签来决定编译的结果不同。
+
+所以我们在_createElement就要加上对应的逻辑。
+
+用于区分并生成不同的VNode。
+
+因为_c的参数tag均为字符串。
+
+所以根据isReservedTag来判断是否是保留字。
+
+如果非保留字且实例上的components存在对应的键值对时，则表示这是一个组件。
+
+调用createComponent并将对应的组件当作第一个参数传入。
+
+```js
+export function createComponent(
+  Ctor,
+  data,
+  context,
+  children,
+  tag
+){ 
+
+  const baseCtor = context.$options._base
+
+  // plain options object: turn it into a constructor
+  if (isObject(Ctor)) {
+    Ctor = baseCtor.extend(Ctor as typeof Component)
+  }
+
+  // if at this stage it's not a constructor or an async component factory,
+  // reject.
+  if (typeof Ctor !== 'function') {
+    if (__DEV__) {
+      warn(`Invalid Component definition: ${String(Ctor)}`, context)
+    }
+    return
+  }
+
+  // async component
+  let asyncFactory
+  // @ts-expect-error
+  if (isUndef(Ctor.cid)) {
+    asyncFactory = Ctor
+    Ctor = resolveAsyncComponent(asyncFactory, baseCtor)
+    if (Ctor === undefined) {
+      // return a placeholder node for async component, which is rendered
+      // as a comment node but preserves all the raw information for the node.
+      // the information will be used for async server-rendering and hydration.
+      return createAsyncPlaceholder(asyncFactory, data, context, children, tag)
+    }
+  }
+
+  data = data || {}
+
+  // resolve constructor options in case global mixins are applied after
+  // component constructor creation
+  resolveConstructorOptions(Ctor as typeof Component)
+
+  // transform component v-model data into props & events
+  if (isDef(data.model)) {
+    // @ts-expect-error
+    transformModel(Ctor.options, data)
+  }
+
+  // extract props
+  // @ts-expect-error
+  const propsData = extractPropsFromVNodeData(data, Ctor, tag)
+
+  // functional component
+  // @ts-expect-error
+  if (isTrue(Ctor.options.functional)) {
+    return createFunctionalComponent(
+      Ctor as typeof Component,
+      propsData,
+      data,
+      context,
+      children
+    )
+  }
+
+  // extract listeners, since these needs to be treated as
+  // child component listeners instead of DOM listeners
+  const listeners = data.on
+  // replace with listeners with .native modifier
+  // so it gets processed during parent component patch.
+  data.on = data.nativeOn
+
+  // @ts-expect-error
+  if (isTrue(Ctor.options.abstract)) {
+    // abstract components do not keep anything
+    // other than props & listeners & slot
+
+    // work around flow
+    const slot = data.slot
+    data = {}
+    if (slot) {
+      data.slot = slot
+    }
+  }
+
+  // install component management hooks onto the placeholder node
+  installComponentHooks(data)
+
+  // return a placeholder vnode
+  // @ts-expect-error
+  const name = getComponentName(Ctor.options) || tag
+  const vnode = new VNode(
+    // @ts-expect-error
+    `vue-component-${Ctor.cid}${name ? `-${name}` : ''}`,
+    data,
+    undefined,
+    undefined,
+    undefined,
+    context,
+    // @ts-expect-error
+    { Ctor, propsData, listeners, tag, children },
+    asyncFactory
+  )
+
+  return vnode
+}
+```
+
+## 7.1 installComponentHooks
+
+```js
+const componentVNodeHooks = {
+  init(vnode: VNodeWithData, hydrating: boolean): boolean | void {
+    if (
+      vnode.componentInstance &&
+      !vnode.componentInstance._isDestroyed &&
+      vnode.data.keepAlive
+    ) {
+      // kept-alive components, treat as a patch
+      const mountedNode: any = vnode // work around flow
+      componentVNodeHooks.prepatch(mountedNode, mountedNode)
+    } else {
+      const child = (vnode.componentInstance = createComponentInstanceForVnode(
+        vnode,
+        activeInstance
+      ))
+      child.$mount(hydrating ? vnode.elm : undefined, hydrating)
+    }
+  },
+
+  prepatch(oldVnode: MountedComponentVNode, vnode: MountedComponentVNode) {
+    const options = vnode.componentOptions
+    const child = (vnode.componentInstance = oldVnode.componentInstance)
+    updateChildComponent(
+      child,
+      options.propsData, // updated props
+      options.listeners, // updated listeners
+      vnode, // new parent vnode
+      options.children // new children
+    )
+  },
+
+  insert(vnode: MountedComponentVNode) {
+    const { context, componentInstance } = vnode
+    if (!componentInstance._isMounted) {
+      componentInstance._isMounted = true
+      callHook(componentInstance, 'mounted')
+    }
+    if (vnode.data.keepAlive) {
+      if (context._isMounted) {
+        // vue-router#1212
+        // During updates, a kept-alive component's child components may
+        // change, so directly walking the tree here may call activated hooks
+        // on incorrect children. Instead we push them into a queue which will
+        // be processed after the whole patch process ended.
+        queueActivatedComponent(componentInstance)
+      } else {
+        activateChildComponent(componentInstance, true /* direct */)
+      }
+    }
+  },
+
+  destroy(vnode: MountedComponentVNode) {
+    const { componentInstance } = vnode
+    if (!componentInstance._isDestroyed) {
+      if (!vnode.data.keepAlive) {
+        componentInstance.$destroy()
+      } else {
+        deactivateChildComponent(componentInstance, true /* direct */)
+      }
+    }
+  }
+}
+
+function installComponentHooks(data: VNodeData) {
+  const hooks = data.hook || (data.hook = {})
+  for (let i = 0; i < hooksToMerge.length; i++) {
+    const key = hooksToMerge[i]
+    const existing = hooks[key]
+    const toMerge = componentVNodeHooks[key]
+    // @ts-expect-error
+    if (existing !== toMerge && !(existing && existing._merged)) {
+      hooks[key] = existing ? mergeHook(toMerge, existing) : toMerge
+    }
+  }
+}
+```
+
+所以当这个VNode是一个组件VNode时。
+
+他的data.hooks是有值并存在四个hook的。
+
+# 6. 总结 
+
+为了避免重复操作真实 DOM 所带来的性能消耗，vue框架引入了虚拟 DOM。
+
+虚拟 DOM本质上就是一个具有特有属性的一个 JS对象。
+
+为了实现创建虚拟 DOM 的一致性，vue提供了一个方法 createElement 用来方便快捷的生成虚拟 DOM。
 
 
 
